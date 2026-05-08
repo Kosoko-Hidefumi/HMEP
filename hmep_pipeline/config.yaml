@@ -1,0 +1,48 @@
+# HMEP pipeline config
+
+outlook:
+  folder_name: ""
+  sender_email: "hmepopencrossclass@umin.ac.jp"
+  subject_must_contain: "HMEP"
+  # レクチャー「開催日」で台帳を絞る（出力に含める開催日の範囲）
+  lecture_date_from: "2025-01-01"
+  lecture_date_to: "2026-05-31"
+  # メール「受信日」の走査範囲（2025/1 開催でも 2024年中に案内が来ることがあるため広めに）
+  received_date_from: "2024-06-01"
+  received_date_to: "2026-12-31"
+
+parse:
+  subject_date_patterns: []
+  allow_empty_description: true
+  # 略歴ブロックがなくても行を作る（本文に 【講師紹介】 のみ等）
+  allow_empty_biography: true
+  # 1通に複数回分のブロックがある場合に分割して抽出
+  split_multiple_sessions: true
+
+rename:
+  # リネーム対象レクチャー日の範囲（全件不要のため抽出期間と同一でよい）
+  date_from: "2025-01-01"
+  date_to: "2026-05-31"
+  time_window_hours: 24
+  similarity_threshold: 0.22
+  recursive: true
+  extensions:
+    - ".mp4"
+    - ".mov"
+    - ".avi"
+    - ".mkv"
+
+paths:
+  data_dir: "data"
+  # 実際の収録動画はリポジトリルート直下の 2025/ を想定（必要に応じて変更）
+  videos_dir: "../2025"
+  videos_renamed_dir: "videos_renamed"
+  lectures_xlsx: "data/lectures.xlsx"
+  upload_log_csv: "data/upload_log.csv"
+  logs_dir: "logs"
+  credentials_dir: "credentials"
+
+youtube:
+  playlist_id: ""
+  default_language: "ja"
+  privacy_status: "unlisted"

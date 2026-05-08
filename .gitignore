@@ -1,0 +1,36 @@
+# 仮想環境
+.venv/
+venv/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# 認証・秘密情報（必ず credentials/ 外に出さない）
+credentials/*
+!credentials/.gitkeep
+**/client_secrets.json
+**/token.json
+
+# データ・ログ（生成物・個人情報・大容量を避ける）
+hmep_pipeline/data/*.xlsx
+hmep_pipeline/data/*.csv
+hmep_pipeline/logs/*.log
+
+# 動画・圧縮（リポジトリにコミットしない）
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.zip
+
+# OS / エディタ
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/

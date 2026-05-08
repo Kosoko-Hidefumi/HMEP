@@ -1,0 +1,9 @@
+# HMEP pipeline Python dependencies (F1 baseline; pins for reproducibility)
+
+pywin32==308
+openpyxl==3.1.5
+PyYAML==6.0.2
+
+google-api-python-client==2.170.0
+google-auth-oauthlib==1.2.2
+google-auth-httplib2==0.2.0
