@@ -1,0 +1,17 @@
+【レクチャー情報】
+開催日：{lecture_date}
+対象：{target_grade}
+タイトル：{title}
+
+【講師】
+{speaker_name} 先生
+{speaker_affiliation}
+
+【講義紹介】
+{description}
+
+【講師略歴】
+{biography}
+
+── Hawaii Medical Education Program (HMEP) ──
+ハワイ大学沖縄事務所

@@ -25,6 +25,8 @@ rename:
   date_to: "2026-05-31"
   time_window_hours: 24
   similarity_threshold: 0.22
+  # strict で落ちた行のフォールバック: (A) パスに開催日が含まれる候補 (B) 時間窓内の最高類似度。どちらもこの下限以上なら採用
+  similarity_fallback: 0.10
   recursive: true
   extensions:
     - ".mp4"
@@ -43,6 +45,15 @@ paths:
   credentials_dir: "credentials"
 
 youtube:
+  # Google Cloud のデスクトップ OAuth 用 JSON（Git に含めない）
+  client_secrets_file: "credentials/client_secrets.json"
+  token_file: "credentials/token.json"
+  description_template_file: "03_upload/description_template.txt"
+  # アップロード後にここへ追加。空ならプレイリスト登録をスキップ
   playlist_id: ""
+  # 教育カテゴリ（既定 27）。チャンネル地域で異なる場合は要確認
+  category_id: "27"
   default_language: "ja"
   privacy_status: "unlisted"
+  # YouTube Data API クォータ対策: 1 実行でアップロードする上限（0＝制限なし）
+  max_uploads_per_run: 6

@@ -1,9 +1,10 @@
 """
 ② 動画リネーム: lectures.xlsx と動画フォルダを突合し、videos_renamed/ にコピーする。
 
-マッチング: レクチャー日時（日付＋開始時刻）と動画更新日時が time_window_hours 以内、
-かつファイル名と講師名・タイトルの類似度がしきい値以上のものを採用。
-
+マッチング（優先順）:
+1) 動画の更新時刻が開催日時の±time_window_hours以内 かつ 類似度≥similarity_threshold
+2) 未使用動画のうちパスに開催日が含まれるもので類似度最大が≥similarity_fallback
+3) 時間窓内の動画で類似度最大が≥similarity_fallback（開催日近傍の収録を優先）
 使用例（hmep_pipeline/02_rename から）:
   python rename_videos.py --dry-run
   python rename_videos.py
@@ -130,6 +131,74 @@ def mtime_dt(p: Path) -> datetime:
     return datetime.fromtimestamp(p.stat().st_mtime)
 
 
+def path_suggests_lecture_date(vp: Path, ld: date) -> bool:
+    """パスまたはファイル名に、台帳の開催日と解釈できる日付が含まれるか（緩いヒント）。"""
+    s = str(vp.resolve()).replace("\\", "/")
+    y, m, d = ld.year, ld.month, ld.day
+    needle_variants = [
+        f"{y}-{m:02d}-{d:02d}",
+        f"{y}-{m}-{d}",
+        f"{y}.{m}.{d}",
+        f"{y}.{m:02d}.{d:02d}",
+        f"{y}/{m:02d}/{d:02d}",
+        f"{y}年{m}月{d}日",
+        f"{y}{m:02d}{d:02d}",
+    ]
+    return any(n in s for n in needle_variants)
+
+
+def select_video_for_row(
+    all_videos: list[Path],
+    used: set[Path],
+    speaker: str,
+    title: str,
+    ld: date,
+    ldt: datetime,
+    window_h: float,
+    threshold: float,
+    fallback: float,
+) -> tuple[Optional[Path], float, str]:
+    """候補動画1本を選ぶ。
+
+    - strict: 時間窓内かつ類似度>=threshold
+    - relaxed_date: パスに開催日が含まれる未使用動画のうち類似度最大が>=fallback
+    - relaxed_window: 時間窓内の類似度最大が>=fallback（厳密阈未満でも採用。誤割当は global より抑えやすい）
+    """
+    best_w: Optional[Path] = None
+    best_w_sc = -1.0
+    for vp in all_videos:
+        if vp in used:
+            continue
+        if not within_hours(mtime_dt(vp), ldt, window_h):
+            continue
+        sc = similarity_to_filename(vp, speaker, title)
+        if sc > best_w_sc:
+            best_w_sc = sc
+            best_w = vp
+    if best_w is not None and best_w_sc >= threshold:
+        return best_w, best_w_sc, "strict"
+
+    best_d: Optional[Path] = None
+    best_d_sc = -1.0
+    for vp in all_videos:
+        if vp in used:
+            continue
+        if not path_suggests_lecture_date(vp, ld):
+            continue
+        sc = similarity_to_filename(vp, speaker, title)
+        if sc > best_d_sc:
+            best_d_sc = sc
+            best_d = vp
+    if best_d is not None and best_d_sc >= fallback:
+        return best_d, best_d_sc, "relaxed_date"
+
+    if best_w is not None and best_w_sc >= fallback:
+        return best_w, best_w_sc, "relaxed_window"
+
+    report_sc = max(best_w_sc, best_d_sc)
+    return None, report_sc, "none"
+
+
 def collect_videos(root: Path, exts: set[str], recursive: bool) -> list[Path]:
     out: list[Path] = []
     if not root.is_dir():
@@ -220,7 +289,15 @@ def pick_unique_dest(dest_dir: Path, filename: str) -> Path:
         n += 1
 
 
-def run_rename(config_path: Path, dry_run: bool, force: bool) -> int:
+def run_rename(
+    config_path: Path,
+    dry_run: bool,
+    force: bool,
+    limit: Optional[int] = None,
+    time_window_hours_override: Optional[float] = None,
+    similarity_threshold_override: Optional[float] = None,
+    similarity_fallback_override: Optional[float] = None,
+) -> int:
     cfg = load_config(config_path)
     root = config_path.parent
 
@@ -232,7 +309,14 @@ def run_rename(config_path: Path, dry_run: bool, force: bool) -> int:
     end_d = date.fromisoformat(str(date_to_s)[:10])
 
     window_h = float(r_cfg.get("time_window_hours", 24))
+    if time_window_hours_override is not None:
+        window_h = float(time_window_hours_override)
     threshold = float(r_cfg.get("similarity_threshold", 0.22))
+    if similarity_threshold_override is not None:
+        threshold = float(similarity_threshold_override)
+    fallback = float(r_cfg.get("similarity_fallback", 0.10))
+    if similarity_fallback_override is not None:
+        fallback = float(similarity_fallback_override)
     recursive = bool(r_cfg.get("recursive", True))
     exts = {str(x).lower() for x in (r_cfg.get("extensions") or [".mp4"])}
 
@@ -265,8 +349,16 @@ def run_rename(config_path: Path, dry_run: bool, force: bool) -> int:
         videos_dir,
         recursive,
     )
+    logging.info("time_window_hours=%s", window_h)
+    logging.info(
+        "similarity threshold=%s fallback (path or window)=%s",
+        threshold,
+        fallback,
+    )
 
     used: set[Path] = set()
+    max_renames = limit if limit is not None and limit > 0 else 0
+    n_renamed = 0
 
     for row in rows:
         ld = to_date(row.get("lecture_date"))
@@ -284,30 +376,39 @@ def run_rename(config_path: Path, dry_run: bool, force: bool) -> int:
         # 開始時刻列は廃止。マッチングの基準時刻は開催日の正午（±24h 窓）
         ldt = lecture_datetime(ld, None)
 
-        best: Optional[Path] = None
-        best_sc = -1.0
-        for vp in all_videos:
-            if vp in used:
-                continue
-            if not within_hours(mtime_dt(vp), ldt, window_h):
-                continue
-            sc = similarity_to_filename(vp, speaker, title)
-            if sc > best_sc:
-                best_sc = sc
-                best = vp
-
-        if best is None or best_sc < threshold:
+        best, best_sc, how = select_video_for_row(
+            all_videos,
+            used,
+            speaker,
+            title,
+            ld,
+            ldt,
+            window_h,
+            threshold,
+            fallback,
+        )
+        if how == "none" or best is None:
             row["rename_status"] = "skipped_no_match"
             row["rename_match_score"] = round(best_sc, 4) if best_sc >= 0 else None
             logging.info(
-                "no match: %s %s | best_score=%s",
+                "no match: %s %s | best_score=%.3f",
                 ld,
                 title[:40],
-                f"{best_sc:.3f}" if best and best_sc >= 0 else "n/a",
+                best_sc,
             )
             continue
 
+        if max_renames and n_renamed >= max_renames:
+            row["rename_status"] = "skipped_limit"
+            continue
+
         assert best is not None
+        status_for_tag = {
+            "strict": "ok",
+            "relaxed_date": "ok_relaxed_date",
+            "relaxed_window": "ok_relaxed_window",
+        }
+
         fname = build_target_filename(ld, speaker, title, best.suffix)
         dest_path = pick_unique_dest(dest_dir, fname)
 
@@ -318,15 +419,17 @@ def run_rename(config_path: Path, dry_run: bool, force: bool) -> int:
 
         if dry_run:
             logging.info(
-                "[dry-run] COPY %s -> %s (score=%.3f)",
+                "[dry-run] COPY %s -> %s (score=%.3f %s)",
                 rel_src,
                 dest_path.name,
                 best_sc,
+                how,
             )
-            row["rename_status"] = "dry_run_ok"
+            row["rename_status"] = f"dry_run_{status_for_tag.get(how, 'ok')}"
             row["source_video_file"] = rel_src
             row["renamed_video_file"] = dest_path.name
             row["rename_match_score"] = round(best_sc, 4)
+            n_renamed += 1
             continue
 
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -336,8 +439,15 @@ def run_rename(config_path: Path, dry_run: bool, force: bool) -> int:
         row["source_video_file"] = rel_src
         row["renamed_video_file"] = dest_path.name
         row["rename_match_score"] = round(best_sc, 4)
-        row["rename_status"] = "ok"
-        logging.info("copied: %s -> %s (score=%.3f)", rel_src, dest_path.name, best_sc)
+        row["rename_status"] = status_for_tag.get(how, "ok")
+        logging.info(
+            "copied: %s -> %s (score=%.3f %s)",
+            rel_src,
+            dest_path.name,
+            best_sc,
+            how,
+        )
+        n_renamed += 1
 
     if dry_run:
         logging.info("dry-run: no files copied, no xlsx save")
@@ -361,6 +471,34 @@ def main(argv: Optional[list[str]] = None) -> int:
         action="store_true",
         help="既に renamed_video_file がある行も再マッチ",
     )
+    p.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="コピー成功させる最大件数（試験用。省略時は制限なし）",
+    )
+    p.add_argument(
+        "--time-window-hours",
+        type=float,
+        default=None,
+        metavar="H",
+        help="マッチングの±時間窓（時間）。指定時は config の rename.time_window_hours より優先",
+    )
+    p.add_argument(
+        "--similarity-threshold",
+        type=float,
+        default=None,
+        metavar="T",
+        help="厳密マッチの類似度下限（既定は config の rename.similarity_threshold）",
+    )
+    p.add_argument(
+        "--similarity-fallback",
+        type=float,
+        default=None,
+        metavar="T",
+        help="フォールバックの類似度下限（rename.similarity_fallback）",
+    )
     args = p.parse_args(argv)
 
     cfg_path = args.config.resolve()
@@ -369,7 +507,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     try:
-        return run_rename(cfg_path, args.dry_run, args.force)
+        return run_rename(
+            cfg_path,
+            args.dry_run,
+            args.force,
+            limit=args.limit,
+            time_window_hours_override=args.time_window_hours,
+            similarity_threshold_override=args.similarity_threshold,
+            similarity_fallback_override=args.similarity_fallback,
+        )
     except ValueError as e:
         print(e, file=sys.stderr)
         return 3

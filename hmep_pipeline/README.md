@@ -24,7 +24,7 @@ python -c "import yaml, openpyxl; print('ok')"
 - `config.yaml` — パス・Outlook フォルダ名など（**相対パスは `hmep_pipeline/` を基準**とする想定で後続スクリプトで読み込む）
 - `01_extract/extract_lectures.py` — ① Outlook → `data/lectures.xlsx`（F2）
 - `02_rename/rename_videos.py` — ② 動画のコピー＋リネーム → `videos_renamed/`（F4）
-- `03_upload/` — ③ YouTube（**未実装: F5**）
+- `03_upload/upload_youtube.py` — ③ YouTube アップロード（F5）
 - `data/` — `lectures.xlsx` 等の生成先
 - `credentials/` — OAuth 秘密情報（`.gitignore` 対象）
 
@@ -68,6 +68,23 @@ python rename_videos.py
 
 - ログ: `logs/rename_YYYY-MM-DD.log`
 
+## F5 — YouTube アップロード（upload_youtube.py）
+
+1. Google Cloud で **YouTube Data API v3** を有効化し、OAuth クライアント（デスクトップアプリ）の JSON を **`credentials/client_secrets.json`** に保存する。
+2. `config.yaml` の **`youtube.playlist_id`** に、登録先プレイリスト ID を入れる（空のときはアップロードのみでプレイリスト登録はスキップ）。
+3. **1 日のクォータ**（アップロードはユニット消費が大きい）を避けるため、`youtube.max_uploads_per_run`（既定 6）または **`python upload_youtube.py --limit 3`** で件数を切る。
+
+```powershell
+Set-Location hmep_pipeline\03_upload
+python upload_youtube.py --dry-run
+python upload_youtube.py
+```
+
+- 入力: `paths.videos_renamed_dir`（既定 `videos_renamed/`）のファイル名が、台帳の `renamed_video_file` と一致する行。開催日は `rename.date_from`～`date_to`（なければ `outlook.lecture_date_*`）。
+- 出力: `data/upload_log.csv`（成功・失敗の履歴）、`lectures.xlsx` に `youtube_video_id` / `youtube_url` / `upload_status` / `uploaded_at`。
+- `upload_log.csv` に **`status=ok`** の `local_file` がある場合、**`--force` がない限り再アップロードしません**（重複防止）。
+- ログ: `logs/upload_YYYY-MM-DD.log`
+
 ## 次のステップ
 
-実装手順書 **F5**（YouTube アップロード）。
+実装手順書 **F6**（`main.py` で extract / rename / upload を統合）。
