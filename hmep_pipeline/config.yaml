@@ -10,6 +10,8 @@ outlook:
   # メール「受信日」の走査範囲（2025/1 開催でも 2024年中に案内が来ることがあるため広めに）
   received_date_from: "2024-06-01"
   received_date_to: "2026-12-31"
+  # true なら、data/lectures.xlsx にある開催日の最大値以降に受信したメールだけを走査（負荷軽減）。初回のみ・過去を一括再取り込みする場合は false
+  scan_from_last_lecture_date: true
 
 parse:
   subject_date_patterns: []

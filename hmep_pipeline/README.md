@@ -1,6 +1,6 @@
 # HMEP レクチャー動画管理パイプライン（開発用）
 
-`要件定義書.md` / `実装手順書.md` に基づく実装置き場です。**運用マニュアルは F7 で別途整備**します。
+`要件定義書.md` / `実装手順書.md` に基づく実装置き場です。**運用マニュアルは F7 で別途整備**します。Claude Code での定型運用はリポジトリルートの **`../Claude_Code_自動化手順.md`** を参照してください。
 
 ## 前提
 
@@ -22,6 +22,7 @@ python -c "import yaml, openpyxl; print('ok')"
 ## 構成
 
 - `config.yaml` — パス・Outlook フォルダ名など（**相対パスは `hmep_pipeline/` を基準**とする想定で後続スクリプトで読み込む）
+- `main.py` — **F6** 統合エントリ（`extract` / `rename` / `upload` / `all`）。フェーズ境界は `logs/pipeline_YYYY-MM-DD.log` に記録
 - `01_extract/extract_lectures.py` — ① Outlook → `data/lectures.xlsx`（F2）
 - `02_rename/rename_videos.py` — ② 動画のコピー＋リネーム → `videos_renamed/`（F4）
 - `03_upload/upload_youtube.py` — ③ YouTube アップロード（F5）
@@ -32,7 +33,7 @@ python -c "import yaml, openpyxl; print('ok')"
 
 1. Outlook で対象メールを **`outlook.folder_name`** に置く。空なら **受信トレイ**を走査。**Outlook 起動済み**で実行。
 2. **`outlook.sender_email`** / **`outlook.subject_must_contain`** が設定されている場合、その送信元・件名キーワードで絞り込み（いずれも空ならフィルタなし）。
-3. **`outlook.received_date_from` / `received_date_to`** … メールを **受信日** で走査する範囲。2025年1月開催でも案内が2024年に届く場合があるため、`lecture_date_*` より広く取る。
+3. **`outlook.received_date_from` / `received_date_to`** … メールを **受信日** で走査する範囲（実効の下限は `outlook.scan_from_last_lecture_date` が true のとき **台帳の最終開催日**と `received_date_from` の遅い方に繰り上げ）。2025年1月開催でも案内が2024年に届く場合があるため、初回・全件再取り込みのときは `scan_from_last_lecture_date: false` にするなどして広めに取る。
 4. **`outlook.lecture_date_from` / `lecture_date_to`** … 台帳に載せる **開催日** の範囲。
 5. 重複行は **同一開催日 + 正規化した講師名 + タイトル** で1行にまとめ、**最新の受信日時**のメールを採用（リマインド複数通に対応）。
 6. 本文は `【講義紹介文】` / `【講義紹介】`、`【講師略歴】` / `【講師紹介】` などの表記ゆれに対応。略歴が無い場合は `parse.allow_empty_biography` でプレースホルダ可。1通に複数講義がある場合は `parse.split_multiple_sessions` で分割。
@@ -85,6 +86,22 @@ python upload_youtube.py
 - `upload_log.csv` に **`status=ok`** の `local_file` がある場合、**`--force` がない限り再アップロードしません**（重複防止）。
 - ログ: `logs/upload_YYYY-MM-DD.log`
 
+## F6 — 一括実行（main.py）
+
+`hmep_pipeline/` をカレントにして実行する。**`all`** は ①→②→③ を順に実行し、いずれかが非ゼロ終了なら以降のフェーズはスキップする（要件定義 5）。各サブコマンドの引数は、対応する単体スクリプトと同じものをそのまま渡せる。
+
+```powershell
+Set-Location hmep_pipeline
+python main.py --help
+python main.py extract --dry-run
+python main.py rename --dry-run
+python main.py upload --dry-run --limit 3
+python main.py all --dry-run
+python main.py all --upload-limit 6
+```
+
+- **集約ログ:** `logs/pipeline_YYYY-MM-DD.log`（開始・終了・終了コード）。抽出・リネーム・アップロードの詳細は従来どおり各 `extract_` / `rename_` / `upload_` の日付ログを参照。
+
 ## 次のステップ
 
-実装手順書 **F6**（`main.py` で extract / rename / upload を統合）。
+実装手順書 **F7**（運用マニュアル・セキュリティ／引き渡し）。

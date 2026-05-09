@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import csv
 import logging
+import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -155,6 +156,13 @@ def bare_speaker_name(val: Any) -> str:
     return s
 
 
+def sanitize_youtube_description(text: str) -> str:
+    """YouTube が snippet.description で拒否しがちな表記を弱める（例: mailto の角括弧付き）。"""
+    # Outlook 由来の "email <mailto:email>" は invalidDescription になることがある
+    text = re.sub(r"\s*<mailto:[^>]+>", "", text)
+    return text
+
+
 def build_description(row: dict[str, Any], template: str) -> str:
     def g(key: str) -> str:
         v = row.get(key)
@@ -172,7 +180,7 @@ def build_description(row: dict[str, Any], template: str) -> str:
         "biography": g("biography"),
     }
 
-    out = template.format(**ctx)
+    out = sanitize_youtube_description(template.format(**ctx))
     if len(out) > 5000:
         return out[:4997] + "..."
     return out

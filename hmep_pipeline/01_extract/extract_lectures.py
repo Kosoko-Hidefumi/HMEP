@@ -539,6 +539,21 @@ def row_dict_from_parsed(p: ParsedRow) -> dict[str, Any]:
     }
 
 
+def max_lecture_date_in_workbook(xlsx_path: Path) -> Optional[date]:
+    """台帳に既にある行のうち、開催日 lecture_date の最大値。行がなければ None。"""
+    if not xlsx_path.is_file():
+        return None
+    _, rows = load_lectures_workbook_rows(xlsx_path)
+    best: Optional[date] = None
+    for d in rows:
+        ld = cell_to_date(d.get("lecture_date"))
+        if ld is None:
+            continue
+        if best is None or ld > best:
+            best = ld
+    return best
+
+
 def load_lectures_workbook_rows(xlsx_path: Path) -> tuple[list[str], list[dict[str, Any]]]:
     if not xlsx_path.is_file():
         return list(COLUMNS), []
@@ -722,6 +737,30 @@ def run_extract(config_path: Path, dry_run: bool) -> int:
     log_dir = resolve_under_root(root, logs_rel)
 
     setup_logging(log_dir)
+
+    recv_floor_cfg = recv_start
+    scan_from_last = bool(outlook_cfg.get("scan_from_last_lecture_date", True))
+    if scan_from_last:
+        mx = max_lecture_date_in_workbook(xlsx_path)
+        if mx is not None:
+            old = recv_start
+            recv_start = max(recv_start, mx)
+            if recv_start != old:
+                logging.info(
+                    "Outlook 走査の受信日下限を台帳の最終開催日に合わせて更新: %s → %s（config received_date_from=%s、台帳最終開催日=%s）",
+                    old,
+                    recv_start,
+                    recv_floor_cfg,
+                    mx,
+                )
+
+    if recv_start > recv_end:
+        logging.warning(
+            "受信日の範囲が空です（下限 %s ＞ 上限 %s）。台帳・config の日付を確認してください。",
+            recv_start,
+            recv_end,
+        )
+        return 0
 
     new_parsed: list[ParsedRow] = []
     failed_all: list[FailedRow] = []
